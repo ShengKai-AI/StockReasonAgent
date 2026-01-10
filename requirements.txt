@@ -1,0 +1,7 @@
+streamlit
+pandas
+openai
+akshare
+tavily-python
+streamlit-authenticator
+PyYAML

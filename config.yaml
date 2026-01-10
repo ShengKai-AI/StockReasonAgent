@@ -1,0 +1,13 @@
+credentials:
+  usernames:
+    admin:
+      email: admin@example.com
+      name: Admin User
+      # Password is 'abc' hashed using bcrypt
+      password: $2b$12$OkE7odSV15CWpdvbvTucDuPwA4rsUv0FY.SrWzRr0ZDGZbCD51cl2
+cookie:
+  expiry_days: 30
+  key: random_signature_key
+  name: stock_reason_agent_cookie
+preauthorized:
+  emails: []
