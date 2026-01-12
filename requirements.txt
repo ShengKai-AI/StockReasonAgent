@@ -5,3 +5,5 @@ akshare
 tavily-python
 streamlit-authenticator
 PyYAML
+volcengine-python-sdk[ark]
+langgraph

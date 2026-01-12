@@ -2,65 +2,119 @@
 
 ## 项目简介
 
-这是一个基于 AI Agent 的智能金融分析工具，旨在解决量化与主观投资中的“归因分析”痛点。Agent 能够输入股票代码和日期，不仅展示涨跌幅，还能通过动态业务画像和多层搜索推理，给出股价异动的具体叙事原因（Narrative Attribution）。
+这是一个基于 **Map-Reduce (分治与归并)** 思想的智能金融分析系统。
 
-## 核心功能
+为了解决大规模分析时的“算力浪费”问题（例如：银行板块大涨，没必要对 10 只银行股分别调用 10 次 LLM 进行重复分析），本项目引入了 **“双层架构”** 设计：
 
-1. **动态业务画像 (Dynamic Profiling)**: 基于最新财报/公告，动态生成业务成分（如“80% AI 算力 + 20% 游戏”），而非传统的静态行业分类。
-2. **异动归因推理 (Attribution Reasoning)**: 自动抓取新闻、逻辑推理，区分“板块贝塔”、“个股阿尔法”或“资金博弈”，输出涨跌的叙事逻辑。
+*   **Layer 1: 调度层 (The Dispatcher)** —— 负责量化扫描、归类、去重。
+*   **Layer 2: 执行层 (The Worker)** —— 负责执行 LangGraph 归因任务。
 
-## 技术架构
+---
 
-* **Agent 框架**: LangGraph (用于编排复杂的异动侦探工作流)
-* **LLM**: DeepSeek-V3 / Qwen-2.5 (擅长中文与 A 股逻辑)
-* **数据源**: AkShare (A 股行情/板块/公告), Tavily/Serper (网络搜索)
-* **前端**: Streamlit (K线图 + 归因报告展示)
-* **部署**: Docker
+## 🚀 核心架构升级 (v3.0 - Map-Reduce)
 
-## 目录结构 (Project Structure)
+### 架构流程图
 
-```text
-StockReasonAgent/
-├── README.md               # 项目文档
-├── requirements.txt        # 依赖库
-├── .env.example            # 环境变量配置模板
-├── src/
-│   ├── main.py             # 主入口
-│   ├── graph/              # LangGraph 工作流定义
-│   │   ├── __init__.py
-│   │   ├── state.py        # Agent 状态定义 (State)
-│   │   ├── nodes.py        # 节点逻辑 (数据快照, 关键词生成, 搜索, 归因)
-│   │   └── workflow.py     # 图构建 (Graph Construction)
-│   ├── tools/              # 工具集
-│   │   ├── __init__.py
-│   │   ├── akshare_tools.py # AkShare 数据获取工具
-│   │   └── search_tools.py  # 搜索 API 工具
-│   ├── llm/                # 大模型配置
-│   │   ├── __init__.py
-│   │   └── model.py        # LLM 初始化与 Prompt 模板
-│   └── ui/                 # Streamlit 前端
-│       └── app.py          # 界面代码
+```mermaid
+graph TD
+    subgraph Layer1_Dispatcher [Layer 1: 调度层 (Python Quant Logic)]
+        Input[输入: 股票列表] --> Scan[Quant Scan: 扫描与计算]
+        Scan --> Decision{代码逻辑判别}
+        Decision -->|Abs(个股-行业)<2%| Group_S[放入板块桶 (Sector Bucket)]
+        Decision -->|Abs(个股-龙头)<3%| Group_C[放入概念桶 (Concept Bucket)]
+        Decision -->|其他| Group_I[放入个股桶 (Individual Bucket)]
+        
+        Group_S -->|Merge| Task_S[生成 1 个板块分析任务]
+        Group_C -->|Merge| Task_C[生成 1 个概念分析任务]
+        Group_I -->|Keep| Task_I[生成 N 个个股分析任务]
+    end
+
+    subgraph Layer2_Worker [Layer 2: 执行层 (LangGraph Agent)]
+        Task_S --> Agent_Run[Agent 执行: 搜索 & 归因]
+        Task_C --> Agent_Run
+        Task_I --> Agent_Run
+    end
+
+    Agent_Run --> Result[生成通用报告]
+    Result --> Distribute[分发 (Distribute)]
+    Distribute --> Stock_A[股票 A]
+    Distribute --> Stock_B[股票 B]
+    Distribute --> Stock_C[股票 C]
 ```
 
-## 核心工作流 (Workflow)
+---
 
-基于“洋葱剥皮法”的归因逻辑：
+## 🧠 双层架构详解
 
-1. **数据快照 (Snapshot)**: 获取今日涨跌、换手率、所属概念板块。判断是否为板块共振。
-2. **关键词生成 (Keyword Gen)**: 如果是个股异动，基于“股票名+概念”生成多维度搜索词（事实/关联/时间窗）。
-3. **搜寻与清洗 (Search)**: 执行多层搜索，过滤噪音（如股吧灌水），保留权威信源。
-4. **归因裁决 (The Judge)**: LLM 汇总信息，进行因果推理，输出最终归因报告。
+### Layer 1: 调度层 (The Dispatcher)
+这一层**不调用 LLM**，纯粹使用 Python 逻辑进行快速的量化算术运算，实现“预分组” (Pre-grouping)。
 
-## 快速开始
+**1. 扫描 (Scan)**
+快速获取所有目标股票的 `Change` (涨跌幅), `Sector_Change` (行业涨跌幅), `Concept_Change` (概念龙头涨跌幅)。
 
-1. 环境配置:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
-2. 设置 API Key (在 .env 中配置 DeepSeek 和 Search API Key)。
-3. 运行应用:
-   ```bash
-   streamlit run src/ui/app.py
-   ```
+**2. 归类 (Shuffle/Group)**
+根据硬性规则将股票扔进不同的“桶”：
+*   **板块共振桶**: `abs(个股 - 行业) < 2.0%`。
+    *   *例子*: [招商银行, 兴业银行, 平安银行] -> 全部扔进 "银行板块" 桶。
+*   **概念跟风桶**: `abs(个股 - 概念龙头) < 3.0%`。
+    *   *例子*: [歌尔股份, 立讯精密] -> 全部扔进 "消费电子" 桶。
+*   **独立行情桶**: 不满足上述条件。
+    *   *例子*: [宁德时代] (假设只有它特立独行)。
+
+**3. 任务生成 (Reduce)**
+*   银行板块桶 -> 生成 **1 个** 任务：“分析银行板块今日利好”。
+*   消费电子桶 -> 生成 **1 个** 任务：“分析消费电子今日利好”。
+*   宁德时代 -> 生成 **1 个** 任务：“分析宁德时代今日异动”。
+*   *效果*: 原本需要分析 6 只股票（调用 6 次 Agent），现在只需要调用 3 次。
+
+### Layer 2: 执行层 (The Worker)
+这一层是标准的 **LangGraph Agent**，负责接收具体的“分析主题”并执行深度的搜寻与推理。
+
+*   **Input**: 任务类型 (板块/概念/个股) + 目标名称 (如 "银行板块")。
+*   **Nodes**:
+    *   `Search_Node`: 针对性搜索 (宏观/行业/个股)。
+    *   `Report_Eval_Node`: 生成归因报告并自我打分。
+*   **Output**: 一份高质量的归因报告。
+
+### 后处理: 分发 (Distribute)
+调度器拿到 Worker 返回的“银行板块报告”后，将其**复制**分发给桶里的每一只股票（招商银行、兴业银行...），作为它们的最终解释。
+
+---
+
+## 🛠️ Prompts 设计 (针对 Worker 层)
+
+由于“分类”已经由 Layer 1 的 Python 代码完成，Layer 2 的 Prompt 只需要专注于**针对已知类型**的分析。
+
+### 1. 归因分析 Prompt (通用版)
+```python
+REPORT_PROMPT = """
+你是一个 A 股归因分析师。
+当前任务目标：{target_name}
+任务类型：{task_type} (SECTOR / CONCEPT / STOCK)
+
+请根据搜索结果撰写分析报告：
+- 如果是 SECTOR (板块)：重点寻找宏观政策、行业利好、资金流向。
+- 如果是 CONCEPT (概念)：重点寻找龙头股效应、突发题材消息。
+- 如果是 STOCK (个股)：重点寻找个股公告、业绩、特定传闻。
+
+请生成一段简练、专业的归因结论。
+"""
+```
+
+---
+
+## 🚀 快速开始
+
+### 1. 环境配置
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. 运行
+```bash
+# 启动 Streamlit 应用
+streamlit run app.py
+```
+*(注：app.py 内部将集成 Dispatcher -> LangGraph 的调用逻辑)*
