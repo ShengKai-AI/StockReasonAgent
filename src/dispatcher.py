@@ -51,21 +51,30 @@ class Dispatcher:
             return 0.0
         return self.concept_cache.get(concept_name, 0.0)
 
-    def scan(self, stock_codes: List[str]) -> List[StockData]:
+    def warmup_cache(self):
         """
-        Step 1: 量化扫描 (并发)
-        优化后的流程 (批量获取模式):
-        1. 批量获取所有行业板块和概念板块的涨跌幅数据 (Populate Cache)。
-        2. 并行获取股票原始数据。
-        3. 组装结果 (直接查缓存)。
+        预热缓存：批量获取所有行业板块和概念板块数据的涨跌幅。
+        建议在系统启动时或空闲时调用。
         """
-        # 阶段 0: 预热缓存 (批量获取)
         if not self.sector_cache:
             self.sector_cache = self.stock_api.get_all_sector_data()
         if not self.concept_cache:
             self.concept_cache = self.stock_api.get_all_concept_data()
             
         print(f"⚡ [Dispatcher] 已缓存 {len(self.sector_cache)} 个板块和 {len(self.concept_cache)} 个概念的数据。")
+
+    def scan(self, stock_codes: List[str]) -> List[StockData]:
+        """
+        Step 1: 量化扫描 (并发)
+        优化后的流程 (批量获取模式):
+        1. (可选) 如果未缓存则预热缓存。
+        2. 并行获取股票原始数据。
+        3. 组装结果 (直接查缓存)。
+        """
+        # 阶段 0: 检查缓存
+        if not self.sector_cache or not self.concept_cache:
+             self.warmup_cache()
+
 
         # 阶段 1: 并行获取股票数据
         print(f"📡 [Dispatcher] 正在并行扫描 {len(stock_codes)} 只股票...")

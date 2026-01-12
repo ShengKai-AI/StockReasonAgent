@@ -38,6 +38,14 @@ def init_session_state():
         st.session_state['generated_tasks'] = [] # List[AnalysisTask]
     if 'task_results' not in st.session_state:
         st.session_state['task_results'] = {} # task_id -> {status, score, report, reflection}
+        
+    # 预热缓存 (只运行一次，后台线程)
+    if 'cache_warmed_up' not in st.session_state:
+        import threading
+        # 使用守护线程，这样如果不小心此时关闭server也不会卡住
+        t = threading.Thread(target=st.session_state['dispatcher'].warmup_cache, daemon=True)
+        t.start()
+        st.session_state['cache_warmed_up'] = True
 
 def render_step_1_input():
     st.header("Step 1: 批量输入股票")
