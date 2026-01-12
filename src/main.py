@@ -2,16 +2,16 @@ import sys
 import os
 import argparse
 
-# Add src to python path for local execution if needed
+# 如果需要本地执行，添加 src 到 python 路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.dispatcher import AnalysisTask
 from src.graph.workflow import create_worker_graph
 
 def run_integration_test():
-    print("🚀 [Integration Test] Starting Layer 2 Workflow...")
+    print("🚀 [集成测试] 开始 Layer 2 工作流...")
     
-    # 1. Create a Fake Task (Simulating Layer 1 Output)
+    # 1. 创建一个伪造任务 (模拟 Layer 1 输出)
     task = AnalysisTask(
         task_id="TEST_001",
         task_type="SECTOR",
@@ -19,50 +19,50 @@ def run_integration_test():
         involved_stocks=["招商银行", "平安银行", "兴业银行"]
     )
     
-    # 2. Initialize Graph
+    # 2. 初始化图
     try:
         app = create_worker_graph()
     except Exception as e:
-        print(f"❌ Failed to build graph: {e}")
+        print(f"❌ 构建图失败: {e}")
         return
 
-    # 3. Initial State
+    # 3. 初始状态
     initial_state = {
         "task": task,
         "search_query": None,
         "loop_count": 0
     }
     
-    print(f"📥 Input Task: {task.target_name} ({task.task_type})")
+    print(f"📥 输入任务: {task.target_name} ({task.task_type})")
     
-    # 4. Run Graph
+    # 4. 运行图
     try:
         final_state = app.invoke(initial_state)
         
-        print("\n✅ Workflow Completed!")
+        print("\n✅ 工作流完成!")
         print("-" * 50)
-        print(f"🎯 Confidence Score: {final_state.get('confidence_score')}")
-        print(f"🔄 Loop Count: {final_state.get('loop_count')}")
+        print(f"🎯 置信度得分: {final_state.get('confidence_score')}")
+        print(f"🔄 循环次数: {final_state.get('loop_count')}")
         print("-" * 50)
-        print("📄 Report Content:")
+        print("📄 报告内容:")
         print(final_state.get('report_content'))
         print("-" * 50)
         
     except Exception as e:
-        print(f"❌ Workflow Execution Failed: {e}")
+        print(f"❌ 工作流执行失败: {e}")
         import traceback
         traceback.print_exc()
 
 def main():
-    parser = argparse.ArgumentParser(description="StockReasonAgent CLI")
-    parser.add_argument("--test", action="store_true", help="Run integration test for Layer 2")
+    parser = argparse.ArgumentParser(description="StockReasonAgent CLI 工具")
+    parser.add_argument("--test", action="store_true", help="运行 Layer 2 集成测试")
     args = parser.parse_args()
 
     if args.test:
         run_integration_test()
     else:
-        print("StockReasonAgent CLI")
-        print("Usage: python src/main.py --test")
+        print("StockReasonAgent CLI (命令行工具)")
+        print("用法: python src/main.py --test")
 
 if __name__ == "__main__":
     main()

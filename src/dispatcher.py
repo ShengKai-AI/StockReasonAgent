@@ -43,32 +43,30 @@ class Dispatcher:
     def _get_sector_change_cached(self, sector_name: str) -> float:
         if not sector_name:
             return 0.0
-        if sector_name in self.sector_cache:
-            return self.sector_cache[sector_name]
-        
-        change = self.stock_api.get_sector_change(sector_name)
-        self.sector_cache[sector_name] = change
-        return change
+        # 直接查缓存，如果没有则返回 0.0 (因为我们已经一次性获取了所有)
+        return self.sector_cache.get(sector_name, 0.0)
 
     def _get_concept_change_cached(self, concept_name: str) -> float:
         if not concept_name:
             return 0.0
-        if concept_name in self.concept_cache:
-            return self.concept_cache[concept_name]
-        
-        change = self.stock_api.get_concept_change(concept_name)
-        self.concept_cache[concept_name] = change
-        return change
+        return self.concept_cache.get(concept_name, 0.0)
 
     def scan(self, stock_codes: List[str]) -> List[StockData]:
         """
         Step 1: 量化扫描 (并发)
-        优化后的4阶段流程:
-        1. 并行获取股票原始数据
-        2. 提取唯一的板块/概念
-        3. 并行获取市场数据 (板块/概念涨跌幅)
-        4. 组装结果
+        优化后的流程 (批量获取模式):
+        1. 批量获取所有行业板块和概念板块的涨跌幅数据 (Populate Cache)。
+        2. 并行获取股票原始数据。
+        3. 组装结果 (直接查缓存)。
         """
+        # 阶段 0: 预热缓存 (批量获取)
+        if not self.sector_cache:
+            self.sector_cache = self.stock_api.get_all_sector_data()
+        if not self.concept_cache:
+            self.concept_cache = self.stock_api.get_all_concept_data()
+            
+        print(f"⚡ [Dispatcher] 已缓存 {len(self.sector_cache)} 个板块和 {len(self.concept_cache)} 个概念的数据。")
+
         # 阶段 1: 并行获取股票数据
         print(f"📡 [Dispatcher] 正在并行扫描 {len(stock_codes)} 只股票...")
         raw_data_list = []
@@ -91,54 +89,7 @@ class Dispatcher:
                 except Exception as exc:
                     print(f"  > [错误] {code}: {exc}")
 
-        # 阶段 2: 去重
-        unique_sectors = set()
-        unique_concepts = set()
-        for raw in raw_data_list:
-            if raw['sector']:
-                unique_sectors.add(raw['sector'])
-            for c in raw['concepts']:
-                unique_concepts.add(c)
-        
-        # 阶段 3: 并行获取市场数据 (填充缓存)
-        # 过滤掉已经缓存的数据
-        needed_sectors = [s for s in unique_sectors if s not in self.sector_cache]
-        needed_concepts = [c for c in unique_concepts if c not in self.concept_cache]
-        
-        if needed_sectors or needed_concepts:
-            print(f"⚡ [Dispatcher] 正在批量获取 {len(needed_sectors)} 个板块和 {len(needed_concepts)} 个概念的数据...")
-            
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                # 获取板块数据
-                future_to_sec = {
-                    executor.submit(self.stock_api.get_sector_change, s): s 
-                    for s in needed_sectors
-                }
-                # 获取概念数据
-                future_to_con = {
-                    executor.submit(self.stock_api.get_concept_change, c): c 
-                    for c in needed_concepts
-                }
-                
-                # 收集板块结果
-                for future in as_completed(future_to_sec):
-                    sec = future_to_sec[future]
-                    try:
-                        self.sector_cache[sec] = future.result()
-                    except Exception as e:
-                        print(f"    ! 获取板块 {sec} 失败: {e}")
-                        self.sector_cache[sec] = 0.0
-
-                # 收集概念结果
-                for future in as_completed(future_to_con):
-                    con = future_to_con[future]
-                    try:
-                        self.concept_cache[con] = future.result()
-                    except Exception as e:
-                        print(f"    ! 获取概念 {con} 失败: {e}")
-                        self.concept_cache[con] = 0.0
-
-        # 阶段 4: 组装
+        # 阶段 2: 组装 (无需再次请求网络，直接使用缓存)
         results = []
         for raw in raw_data_list:
             stock_data = StockData(
@@ -149,7 +100,7 @@ class Dispatcher:
                 concepts=raw['concepts']
             )
             
-            # 从缓存填充 (现在已填充)
+            # 从缓存填充
             stock_data.sector_change = self._get_sector_change_cached(raw['sector'])
             
             for concept in raw['concepts']:

@@ -86,8 +86,38 @@ class AkShareTool:
             print(f"❌ 获取原始数据错误: {e}")
             return None
 
+    def get_all_sector_data(self) -> Dict[str, float]:
+        """
+        一次性获取所有行业板块的涨跌幅数据。
+        Returns: {sector_name: change_pct}
+        """
+        try:
+            print("📡 [AkShare] 正在批量获取所有行业板块数据...")
+            df = ak.stock_board_industry_name_em()
+            # 假设列名: '板块名称', '涨跌幅'
+            result = dict(zip(df['板块名称'], df['涨跌幅']))
+            return result
+        except Exception as e:
+            print(f"❌ 批量获取行业板块失败: {e}")
+            return {}
+
+    def get_all_concept_data(self) -> Dict[str, float]:
+        """
+        一次性获取所有概念板块的涨跌幅数据。
+        Returns: {concept_name: change_pct}
+        """
+        try:
+            print("📡 [AkShare] 正在批量获取所有概念板块数据...")
+            df = ak.stock_board_concept_name_em()
+            # 假设列名: '板块名称', '涨跌幅'
+            result = dict(zip(df['板块名称'], df['涨跌幅']))
+            return result
+        except Exception as e:
+            print(f"❌ 批量获取概念板块失败: {e}")
+            return {}
+
     def get_sector_change(self, sector_name: str) -> float:
-        """获取行业板块涨跌幅"""
+        """获取行业板块涨跌幅 (Legacy: 单次查询)"""
         try:
             df = ak.stock_board_industry_name_em()
             target = df[df['板块名称'] == sector_name]
@@ -98,7 +128,7 @@ class AkShareTool:
             return 0.0
 
     def get_concept_change(self, concept_name: str) -> float:
-        """获取概念板块涨跌幅"""
+        """获取概念板块涨跌幅 (Legacy: 单次查询)"""
         try:
             df = ak.stock_board_concept_name_em()
             target = df[df['板块名称'] == concept_name]
