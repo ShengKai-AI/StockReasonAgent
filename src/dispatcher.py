@@ -34,11 +34,15 @@ class AnalysisTask:
     target_name: str
     involved_stocks: List[str]  # 涉及的股票名称或代码列表
 
+import threading
+
 class Dispatcher:
     def __init__(self):
         self.stock_api = AkShareTool()
         self.sector_cache = {}
         self.concept_cache = {}
+        self._warmup_lock = threading.Lock() # 锁机制，防止重复预热
+        self._warmup_thread = None # 保存后台线程引用
 
     def _get_sector_change_cached(self, sector_name: str) -> float:
         if not sector_name:
@@ -51,18 +55,49 @@ class Dispatcher:
             return 0.0
         return self.concept_cache.get(concept_name, 0.0)
 
+    def _execute_warmup_logic(self):
+        """核心预热逻辑"""
+        with self._warmup_lock:
+             # Double check internal state
+            if self.sector_cache and self.concept_cache:
+                return
+
+            print("⚡ [Dispatcher] 开始批量获取板块数据...")
+            try:
+                if not self.sector_cache:
+                    self.sector_cache = self.stock_api.get_all_sector_data()
+                if not self.concept_cache:
+                    self.concept_cache = self.stock_api.get_all_concept_data()
+                print(f"⚡ [Dispatcher] 已缓存 {len(self.sector_cache)} 个板块和 {len(self.concept_cache)} 个概念的数据。")
+            except Exception as e:
+                print(f"⚠️ [Dispatcher] 预热失败: {e}")
+
+    def start_async_warmup(self):
+        """启动后台预热线程"""
+        if self._warmup_thread and self._warmup_thread.is_alive():
+            return
+            
+        self._warmup_thread = threading.Thread(target=self._execute_warmup_logic, daemon=True)
+        self._warmup_thread.start()
+
     def warmup_cache(self):
         """
-        预热缓存：批量获取所有行业板块和概念板块数据的涨跌幅。
-        建议在系统启动时或空闲时调用。
+        同步预热/等待方法：
+        1. 如果有后台线程在跑，则 join 等待其结束。
+        2. 如果没有线程，但也没有数据，则在当前线程直接执行。
         """
-        if not self.sector_cache:
-            self.sector_cache = self.stock_api.get_all_sector_data()
-        if not self.concept_cache:
-            self.concept_cache = self.stock_api.get_all_concept_data()
-            
-        print(f"⚡ [Dispatcher] 已缓存 {len(self.sector_cache)} 个板块和 {len(self.concept_cache)} 个概念的数据。")
-
+        # 情况1: 后台线程正在运行
+        if self._warmup_thread and self._warmup_thread.is_alive():
+             if threading.current_thread() != self._warmup_thread:
+                 print("⏳ [Dispatcher] 检测到后台正在预热，主线程正在等待后台完成...")
+                 self._warmup_thread.join()
+                 print("✅ [Dispatcher] 后台预热完成，主线程继续。")
+                 return
+        
+        # 情况2: 无后台线程，或已结束，直接检查/执行
+        # (利用 _execute_warmup_logic 内部的 Lock 防止并发竞争)
+        self._execute_warmup_logic()
+        
     def scan(self, stock_codes: List[str]) -> List[StockData]:
         """
         Step 1: 量化扫描 (并发)
@@ -71,9 +106,8 @@ class Dispatcher:
         2. 并行获取股票原始数据。
         3. 组装结果 (直接查缓存)。
         """
-        # 阶段 0: 检查缓存
-        if not self.sector_cache or not self.concept_cache:
-             self.warmup_cache()
+        # 阶段 0: 确保缓存已就绪
+        self.warmup_cache()
 
 
         # 阶段 1: 并行获取股票数据

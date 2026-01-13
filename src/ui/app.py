@@ -41,10 +41,8 @@ def init_session_state():
         
     # 预热缓存 (只运行一次，后台线程)
     if 'cache_warmed_up' not in st.session_state:
-        import threading
-        # 使用守护线程，这样如果不小心此时关闭server也不会卡住
-        t = threading.Thread(target=st.session_state['dispatcher'].warmup_cache, daemon=True)
-        t.start()
+        # 调用 Dispatcher 的异步预热方法
+        st.session_state['dispatcher'].start_async_warmup()
         st.session_state['cache_warmed_up'] = True
 
 def render_step_1_input():
@@ -286,6 +284,12 @@ def render_step_3_preview():
     
     selected_tasks = []
     
+    TYPE_MAP = {
+        "SECTOR": "板块共振",
+        "CONCEPT": "概念带动",
+        "STOCK": "个股行情"
+    }
+
     for t in tasks:
         col_chk, col_det = st.columns([0.05, 0.95])
         with col_chk:
@@ -293,7 +297,9 @@ def render_step_3_preview():
             is_selected = st.checkbox("选择", value=True, key=f"sel_{t.task_id}", label_visibility="collapsed")
         
         with col_det:
-            with st.expander(f"📌 [{t.task_type}] {t.target_name} ({len(t.involved_stocks)} 股)"):
+            # 使用中文类型显示
+            display_type = TYPE_MAP.get(t.task_type, t.task_type)
+            with st.expander(f"📌 [{display_type}] {t.target_name} ({len(t.involved_stocks)} 股)"):
                 st.write(f"**涉及股票**: {', '.join(t.involved_stocks)}")
                 st.write(f"**任务ID**: {t.task_id}")
         
@@ -346,7 +352,9 @@ def render_step_4_execution():
         for i, task in enumerate(pending_tasks):
             current_idx = completed + i + 1
             progress_bar.progress(current_idx / total)
-            status_text.markdown(f"🔄 正在分析: **[{task.task_type}] {task.target_name}** ({current_idx}/{total})...")
+            # 映射类型到中文
+            cn_type = {"SECTOR": "板块共振", "CONCEPT": "概念带动", "STOCK": "个股行情"}.get(task.task_type, task.task_type)
+            status_text.markdown(f"正在分析: **[{cn_type}] {task.target_name}** ({current_idx}/{total})...")
             
             # --- LangGraph 执行 ---
             results[task.task_id]['status'] = 'running'
@@ -410,20 +418,22 @@ def render_step_4_execution():
         with col:
             with st.container(border=True):
                 st.markdown(f"### {emoji} {task.target_name}")
-                st.caption(f"Type: {task.task_type} | Stocks: {len(task.involved_stocks)}")
+                # 本地化
+                cn_type = {"SECTOR": "板块共振", "CONCEPT": "概念带动", "STOCK": "个股行情"}.get(task.task_type, task.task_type)
+                st.caption(f"类型: {cn_type} | 包含股票: {len(task.involved_stocks)} 只")
                 if status == 'success':
                     st.markdown(f"**Score: {res['score']}**")
                 elif status == 'fail_low_score':
                     st.markdown(f":red[Score: {res['score']}]")
                 elif status == 'error':
                     st.markdown(":red[Error]")
-                
-                # Button to open report editor
-                if st.button(f"查看/编辑报告", key=f"btn_{task.task_id}"):
-                     view_report_dialog(task.task_id)
+            
+            # Button to open report editor
+            if st.button(f"查看/编辑报告", key=f"btn_{task.task_id}"):
+                view_report_dialog(task.task_id)
 
     if st.button("🔙 返回任务列表"):
-        st.session_state['step'] = 3
+        st.session_state['step'] = 3    
         st.rerun()
 
 @st.dialog("归因报告编辑器", width="large")
@@ -431,7 +441,8 @@ def view_report_dialog(task_id):
     res = st.session_state['task_results'][task_id]
     task = res['task_obj']
     
-    st.markdown(f"### {task.target_name} ({task.task_type})")
+    cn_type = {"SECTOR": "板块共振", "CONCEPT": "概念带动", "STOCK": "个股行情"}.get(task.task_type, task.task_type)
+    st.markdown(f"### {task.target_name} ({cn_type})")
     
     # 反思 / 状态信息
     if res['status'] == 'fail_low_score':
