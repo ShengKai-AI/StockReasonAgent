@@ -398,7 +398,9 @@ def render_step_4_execution():
                 
                 try:
                     # 使用 stream 获取中间步骤，实现流式展示
-                    for step_output in app.stream(initial_state):
+                    # 增加 recursion_limit 以防止多次循环导致被提前终止
+                    stream_config = {"recursion_limit": 50}
+                    for step_output in app.stream(initial_state, config=stream_config):
                         # step_output 格式: {'node_name': {updated_keys...}}
                         for node_name, updates in step_output.items():
                             if updates:
