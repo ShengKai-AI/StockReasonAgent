@@ -461,6 +461,12 @@ def render_step_4_execution():
                     results[task.task_id]['report'] = f"错误: {e}"
                     status_container.update(label="❌ 分析出错", state="error")
                     st.error(f"Error during execution: {e}")
+                
+                # 双重检查：如果循环结束但状态仍为 running，说明异常终止
+                if results[task.task_id]['status'] == 'running':
+                     results[task.task_id]['status'] = 'error'
+                     results[task.task_id]['report'] = "任务异常中断：未知原因导致流程提前结束（可能为网络超时或迭代限制）。"
+                     status_container.update(label="⚠️ 分析中断", state="error")
         progress_bar.progress(1.0)
         st.rerun() # 刷新以显示最终状态
 
