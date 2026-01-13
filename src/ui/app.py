@@ -38,6 +38,8 @@ def init_session_state():
         st.session_state['generated_tasks'] = [] # List[AnalysisTask]
     if 'task_results' not in st.session_state:
         st.session_state['task_results'] = {} # task_id -> {status, score, report, reflection}
+    if 'execution_logs' not in st.session_state:
+        st.session_state['execution_logs'] = {} # task_id -> 列表，存储执行过程中的日志条目
         
     # 预热缓存 (只运行一次，后台线程)
     if 'cache_warmed_up' not in st.session_state:
@@ -357,11 +359,35 @@ def render_step_4_execution():
             results[task.task_id]['status'] = 'running'
             
             # 使用 st.status 提供可折叠的实时进度展示
-            # 用户要求：展示搜索新闻、展示模型思考，可折叠 -> st.status(expanded=True) + st.expander inside
             cn_type = {"SECTOR": "板块共振", "CONCEPT": "概念带动", "STOCK": "个股行情"}.get(task.task_type, task.task_type)
             
             with st.status(f"🤖 正在分析: [{cn_type}] {task.target_name}...", expanded=True) as status_container:
                 
+                # 获取或初始化该任务的持久化日志
+                if task.task_id not in st.session_state['execution_logs']:
+                    st.session_state['execution_logs'][task.task_id] = []
+                task_logs = st.session_state['execution_logs'][task.task_id]
+                
+                # 1. 先渲染历史日志 (防止刷新后消失)
+                for log_item in task_logs:
+                    if log_item['type'] == 'search':
+                        with st.expander(f"搜索结果 (Search Results)", expanded=True):
+                            st.caption("Agent 实时搜索到的原始资讯：")
+                            news = log_item['data']
+                            if isinstance(news, list):
+                                for item in news:
+                                    icon = f"https://www.google.com/s2/favicons?domain={item.get('url', '')}"
+                                    st.markdown(f"![icon]({icon}) [{item.get('title', 'No Title')}]({item.get('url', '#')})")
+                            else:
+                                st.markdown(str(news))
+                    elif log_item['type'] == 'evaluate':
+                        score = log_item['score']
+                        reflect = log_item['reflection']
+                        with st.expander(f"模型思考 (置信度: {score})", expanded=True):
+                            st.write(reflect)
+                    elif log_item['type'] == 'optimize':
+                        st.write(f"优化搜索词: **{log_item['query']}**")
+
                 initial_state = {
                     "task": task,
                     "search_query": None,
@@ -378,12 +404,14 @@ def render_step_4_execution():
                             if updates:
                                 final_state.update(updates)
                             
-                            # Log node name for debugging if needed
-                            # st.write(f"Node finished: {node_name}")
-                            
+                            # 2. 实时处理新日志并持久化
                             if node_name == 'search':
                                 news = updates.get('search_results', [])
-                                # 在状态中实时展示搜索到的新闻 (默认折叠或展开由用户决定，这里默认展开让用户看到)
+                                # 存入日志
+                                log_entry = {'type': 'search', 'data': news}
+                                task_logs.append(log_entry)
+                                
+                                # 立即渲染
                                 with st.expander(f"🌍 搜索结果 (Search Results)", expanded=True):
                                     st.caption("Agent 实时搜索到的原始资讯：")
                                     if isinstance(news, list):
@@ -397,11 +425,16 @@ def render_step_4_execution():
                             elif node_name == 'evaluate':
                                 score = updates.get('confidence_score', 0)
                                 reflect = updates.get('reflection', '')
+                                log_entry = {'type': 'evaluate', 'score': score, 'reflection': reflect}
+                                task_logs.append(log_entry)
+                                
                                 with st.expander(f"🧠 模型思考 (置信度: {score})", expanded=True):
                                     st.write(reflect)
                                     
                             elif node_name == 'optimize':
                                 query = updates.get('search_query', '')
+                                log_entry = {'type': 'optimize', 'query': query}
+                                task_logs.append(log_entry)
                                 st.write(f"🔄 优化搜索词: **{query}**")
                     
                     # 完成
