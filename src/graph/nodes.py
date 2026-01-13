@@ -16,11 +16,11 @@ def node_search(state: GraphState) -> GraphState:
     # 1. 如果为空，生成初始搜索词
     if not current_query:
         if task.task_type == "SECTOR":
-            current_query = f"{task.target_name} 行业 利好 政策 消息"
+            current_query = f"{task.target_name} 行业 政策 消息"
         elif task.task_type == "CONCEPT":
-            current_query = f"{task.target_name} 概念 龙头股 异动原因"
+            current_query = f"{task.target_name} 概念 龙头股"
         else: # STOCK
-            current_query = f"{task.target_name} {task.involved_stocks[0]} 公告 传闻 利好"
+            current_query = f"{task.target_name} {task.involved_stocks[0]} 公告 传闻"
         
         state['search_query'] = current_query
         print(f"🔹 [节点: 搜索] 生成初始搜索词: {current_query}")
