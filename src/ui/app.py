@@ -44,7 +44,8 @@ def init_session_state():
     # 预热缓存 (只运行一次，后台线程)
     if 'cache_warmed_up' not in st.session_state:
         # 调用 Dispatcher 的异步预热方法
-        st.session_state['dispatcher'].start_async_warmup()
+        # [OOM Fix] 暂时禁用全量预热，避免 Streamlit Cloud 内存溢出
+        # st.session_state['dispatcher'].start_async_warmup()
         st.session_state['cache_warmed_up'] = True
 
 def render_step_1_input():
