@@ -44,8 +44,7 @@ def init_session_state():
     # 预热缓存 (只运行一次，后台线程)
     if 'cache_warmed_up' not in st.session_state:
         # 调用 Dispatcher 的异步预热方法
-        # [OOM Fix] 暂时禁用全量预热，避免 Streamlit Cloud 内存溢出
-        # st.session_state['dispatcher'].start_async_warmup()
+        st.session_state['dispatcher'].start_async_warmup()
         st.session_state['cache_warmed_up'] = True
 
 def render_step_1_input():
@@ -346,6 +345,12 @@ def render_step_4_execution():
     progress_bar = st.progress(0)
     status_text = st.empty()
     
+    # [Fix] 自动恢复逻辑：如果有任务卡在 'running' 状态 (说明上次脚本中断了)，将其重置为 'pending'
+    # 这样可以防止任务因 Rerun 中断后变成僵尸状态，导致"思考一半突然结束"
+    for t in tasks:
+        if results[t.task_id]['status'] == 'running':
+            results[t.task_id]['status'] = 'pending'
+            
     # 执行逻辑 (如果有挂起的任务)
     pending_tasks = [t for t in tasks if results[t.task_id]['status'] == 'pending']
     
