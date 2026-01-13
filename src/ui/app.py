@@ -326,6 +326,7 @@ def render_step_3_preview():
                 "score": 0.0,
                 "report": "",
                 "reflection": "",
+                "search_results": "",
                 "task_obj": t
             }
         st.rerun()
@@ -352,42 +353,79 @@ def render_step_4_execution():
         for i, task in enumerate(pending_tasks):
             current_idx = completed + i + 1
             progress_bar.progress(current_idx / total)
-            # 映射类型到中文
-            cn_type = {"SECTOR": "板块共振", "CONCEPT": "概念带动", "STOCK": "个股行情"}.get(task.task_type, task.task_type)
-            status_text.markdown(f"正在分析: **[{cn_type}] {task.target_name}** ({current_idx}/{total})...")
-            
             # --- LangGraph 执行 ---
             results[task.task_id]['status'] = 'running'
             
-            try:
+            # 使用 st.status 提供可折叠的实时进度展示
+            # 用户要求：展示搜索新闻、展示模型思考，可折叠 -> st.status(expanded=True) + st.expander inside
+            cn_type = {"SECTOR": "板块共振", "CONCEPT": "概念带动", "STOCK": "个股行情"}.get(task.task_type, task.task_type)
+            
+            with st.status(f"🤖 正在分析: [{cn_type}] {task.target_name}...", expanded=True) as status_container:
+                
                 initial_state = {
                     "task": task,
                     "search_query": None,
                     "loop_count": 0
                 }
-                final_state = app.invoke(initial_state)
                 
-                # 更新结果
-                score = final_state.get('confidence_score', 0.0)
-                results[task.task_id]['score'] = score
-                results[task.task_id]['report'] = final_state.get('report_content', '暂无内容')
-                results[task.task_id]['reflection'] = final_state.get('reflection', '')
+                final_state = initial_state.copy() # Local accumulator
                 
-                # 根据分数判断成功状态
-                if score > 0.6:
-                    results[task.task_id]['status'] = 'success'
-                else:
-                    results[task.task_id]['status'] = 'fail_low_score'
-            
-            except Exception as e:
-                results[task.task_id]['status'] = 'error'
-                results[task.task_id]['report'] = f"错误: {e}"
-            
-            # 强制 UI 更新？Streamlit 主要在 rerun 时更新。
-            # 我们无法在循环中轻易进行部分更新而不使用 st.empty() 技巧。
-            # 但 results 字典已更新。
-            
-        status_text.success("✅ 所有任务分析完成！")
+                try:
+                    # 使用 stream 获取中间步骤，实现流式展示
+                    for step_output in app.stream(initial_state):
+                        # step_output 格式: {'node_name': {updated_keys...}}
+                        for node_name, updates in step_output.items():
+                            if updates:
+                                final_state.update(updates)
+                            
+                            # Log node name for debugging if needed
+                            # st.write(f"Node finished: {node_name}")
+                            
+                            if node_name == 'search':
+                                news = updates.get('search_results', [])
+                                # 在状态中实时展示搜索到的新闻 (默认折叠或展开由用户决定，这里默认展开让用户看到)
+                                with st.expander(f"🌍 搜索结果 (Search Results)", expanded=True):
+                                    st.caption("Agent 实时搜索到的原始资讯：")
+                                    if isinstance(news, list):
+                                        for item in news:
+                                            # 使用 Google Favicon API 获取图标
+                                            icon = f"https://www.google.com/s2/favicons?domain={item.get('url', '')}"
+                                            st.markdown(f"![icon]({icon}) [{item.get('title', 'No Title')}]({item.get('url', '#')})")
+                                    else:
+                                        st.markdown(str(news))
+                                    
+                            elif node_name == 'evaluate':
+                                score = updates.get('confidence_score', 0)
+                                reflect = updates.get('reflection', '')
+                                with st.expander(f"🧠 模型思考 (置信度: {score})", expanded=True):
+                                    st.write(reflect)
+                                    
+                            elif node_name == 'optimize':
+                                query = updates.get('search_query', '')
+                                st.write(f"🔄 优化搜索词: **{query}**")
+                    
+                    # 完成
+                    status_container.update(label=f"✅ [{task.target_name}] 分析完成", state="complete", expanded=False)
+                    
+                    # 更新结果存储
+                    score = final_state.get('confidence_score', 0.0)
+                    results[task.task_id]['score'] = score
+                    results[task.task_id]['report'] = final_state.get('report_content', '暂无内容')
+                    results[task.task_id]['reflection'] = final_state.get('reflection', '')
+                    # 这里依然保存，但按照用户要求，最终展示时不展示"未用到"的冗余新闻。
+                    # report 本身通常包含引用。
+                    results[task.task_id]['search_results'] = final_state.get('search_results', '')
+                    
+                    if score > 0.6:
+                        results[task.task_id]['status'] = 'success'
+                    else:
+                        results[task.task_id]['status'] = 'fail_low_score'
+                
+                except Exception as e:
+                    results[task.task_id]['status'] = 'error'
+                    results[task.task_id]['report'] = f"错误: {e}"
+                    status_container.update(label="❌ 分析出错", state="error")
+                    st.error(f"Error during execution: {e}")
         progress_bar.progress(1.0)
         st.rerun() # 刷新以显示最终状态
 
@@ -444,11 +482,29 @@ def view_report_dialog(task_id):
     cn_type = {"SECTOR": "板块共振", "CONCEPT": "概念带动", "STOCK": "个股行情"}.get(task.task_type, task.task_type)
     st.markdown(f"### {task.target_name} ({cn_type})")
     
-    # 反思 / 状态信息
+    # --- 透明度展示区域 ---
+    # 用户要求：报告生成后展示最终用到的新闻 (以链接列表形式)
+    
+    with st.expander("🌍 引用新闻 (Relevant News)", expanded=False):
+         news_data = res.get('search_results', [])
+         if isinstance(news_data, list) and news_data:
+              for item in news_data:
+                   icon = f"https://www.google.com/s2/favicons?domain={item.get('url', '')}"
+                   st.markdown(f"![icon]({icon}) [{item.get('title', 'No Title')}]({item.get('url', '#')})")
+         elif news_data and isinstance(news_data, str):
+              st.markdown(news_data)
+         else:
+              st.caption("暂无相关新闻数据")
+    
+    with st.expander("🧠 AI 思考与反思 (Thought Process)", expanded=False):
+        if res.get('reflection'):
+             st.write(res['reflection'])
+        else:
+             st.caption("暂无反思内容")
+
+    # 状态提示
     if res['status'] == 'fail_low_score':
         st.error(f"⚠️ 置信度低 ({res['score']})。请参考反思并手动补充报告。")
-        with st.expander("查看 AI 反思 (Reflection)"):
-            st.write(res['reflection'])
     elif res['status'] == 'success':
         st.success(f"✅ 置信度合格 ({res['score']})")
     

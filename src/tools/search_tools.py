@@ -15,12 +15,13 @@ class TavilySearchTool:
         else:
             self.client = TavilyClient(api_key=self.api_key)
 
-    def search(self, query: str) -> str:
+    def search(self, query: str) -> list:
         """
-        执行搜索并返回格式化的摘要。
+        执行搜索并返回结构化结果列表。
+        Returns: List[Dict] usually containing 'title', 'url', 'content'.
         """
         if not self.api_key:
-            return "错误: 未配置 Tavily API Key。"
+            return [{"title": "Error", "url": "#", "content": "未配置 Tavily API Key。"}]
             
         print(f"🕵️‍♂️ [Layer 2] 正在调用 Tavily 搜索: {query}")
         try:
@@ -40,24 +41,24 @@ class TavilySearchTool:
                 include_raw_content=False
             )
             
-            summary_lines = []
+            valid_results = []
             if 'results' in response and len(response['results']) > 0:
                 for item in response['results']:
                     # 简单的长度过滤
                     if len(item.get('content', '')) > 20: 
-                        line = f"- [{item['title']}]({item['url']}): {item['content'][:300]}..."
-                        summary_lines.append(line)
+                        valid_results.append({
+                            "title": item['title'],
+                            "url": item['url'],
+                            "content": item['content']
+                        })
             
-            if not summary_lines:
-                return "未通过搜索找到相关的高质量新闻。"
-                
-            return "\n\n".join(summary_lines)
+            return valid_results
 
         except Exception as e:
-            return f"搜索错误: {str(e)}"
+            return [{"title": "Error", "url": "#", "content": f"搜索错误: {str(e)}"}]
 
 # Global instance
 search_tool = TavilySearchTool()
 
-def run_search(query: str) -> str:
+def run_search(query: str) -> list:
     return search_tool.search(query)

@@ -33,6 +33,15 @@ def node_search(state: GraphState) -> GraphState:
     state['search_results'] = results
     return state
 
+def _format_results_for_llm(results):
+    if isinstance(results, list):
+        if not results: return "未找到有效新闻。"
+        lines = []
+        for item in results:
+             lines.append(f"- [{item.get('title')}]({item.get('url')}): {item.get('content', '')[:300]}...")
+        return "\n\n".join(lines)
+    return str(results)
+
 def node_evaluate(state: GraphState) -> GraphState:
     """
     使用 LLM 评估搜索结果。
@@ -43,11 +52,14 @@ def node_evaluate(state: GraphState) -> GraphState:
     
     print(f"🔹 [节点: 评估] 正在评估结果质量...")
     
+    # 转换为字符串供 LLM 阅读
+    results_str = _format_results_for_llm(results)
+    
     # 构建 Prompt
     prompt = EVALUATE_PROMPT.format(
         task_type=task.task_type,
         target_name=task.target_name,
-        search_results=results
+        search_results=results_str
     )
     
     try:
@@ -73,7 +85,7 @@ def node_evaluate(state: GraphState) -> GraphState:
         print(f"❌ [节点: 评估] 错误: {e}")
         state['confidence_score'] = 0.0
         state['reflection'] = f"评估过程中发生错误: {str(e)}"
-
+ 
     return state
 
 def node_report(state: GraphState) -> GraphState:
@@ -85,11 +97,14 @@ def node_report(state: GraphState) -> GraphState:
     
     print(f"🔹 [节点: 报告] 正在撰写报告...")
     
+    # 转换为字符串供 LLM 阅读
+    results_str = _format_results_for_llm(results)
+    
     prompt = REPORT_PROMPT.format(
         task_type=task.task_type,
         target_name=task.target_name,
         involved_stocks=", ".join(task.involved_stocks),
-        search_results=results
+        search_results=results_str
     )
     
     try:
