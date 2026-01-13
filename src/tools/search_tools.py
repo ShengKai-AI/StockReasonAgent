@@ -9,18 +9,29 @@ def get_tavily_api_key():
 
 class TavilySearchTool:
     def __init__(self):
-        self.api_key = get_tavily_api_key()
-        if not self.api_key:
-            print("⚠️ 警告: 未找到 TAVILY_API_KEY。")
-        else:
-            self.client = TavilyClient(api_key=self.api_key)
+        self.client = None
+
+    def _ensure_client(self):
+        if self.client:
+            return True
+            
+        api_key = get_tavily_api_key()
+        if not api_key:
+            return False
+            
+        try:
+            self.client = TavilyClient(api_key=api_key)
+            return True
+        except Exception as e:
+            print(f"⚠️ 初始化 Tavily Client 失败: {e}")
+            return False
 
     def search(self, query: str) -> list:
         """
         执行搜索并返回结构化结果列表。
         Returns: List[Dict] usually containing 'title', 'url', 'content'.
         """
-        if not self.api_key:
+        if not self._ensure_client():
             return [{"title": "Error", "url": "#", "content": "未配置 Tavily API Key。"}]
             
         print(f"🕵️‍♂️ [Layer 2] 正在调用 Tavily 搜索: {query}")
