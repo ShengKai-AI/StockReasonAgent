@@ -10,14 +10,14 @@ from src.graph.nodes import (
 def check_score(state: GraphState):
     """
     条件逻辑:
-    - 如果得分 > 0.6: 跳转到报告 (结束)
-    - 如果得分 <= 0.6 且循环次数 < 3: 优化搜索词 -> 重新搜索
-    - 如果得分 <= 0.6 且循环次数 >= 3: 跳转到报告 (强制结束)
+    - 如果高质量新闻 >= 2 条: 跳转到报告 (结束)
+    - 如果高质量新闻 < 2 条 且 循环次数 < 3: 优化搜索词 -> 重新搜索
+    - 如果高质量新闻 < 2 条 且 循环次数 >= 3: 跳转到报告 (强制结束, 会触发 fallback)
     """
-    score = state.get('confidence_score', 0.0)
+    filtered_news = state.get('filtered_news', [])
     loop_count = state.get('loop_count', 0)
     
-    if score > 0.6:
+    if len(filtered_news) >= 2:
         return "accepted"
     
     if loop_count >= 3:

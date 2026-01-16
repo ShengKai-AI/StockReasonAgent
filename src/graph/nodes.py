@@ -1,9 +1,11 @@
 import json
 from src.graph.state import GraphState
 from src.tools.search_tools import run_search
-from src.llm.model import init_llm, EVALUATE_PROMPT, REPORT_PROMPT, QUERY_OPTIMIZE_PROMPT
+from src.llm.model import init_llm, REPORT_PROMPT, QUERY_OPTIMIZE_PROMPT
+from src.llm.small_model import SmallModelClient
 
 llm = init_llm()
+small_model = SmallModelClient()
 
 def node_search(state: GraphState) -> GraphState:
     """
@@ -42,60 +44,88 @@ def _format_results_for_llm(results):
         return "\n\n".join(lines)
     return str(results)
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 def node_evaluate(state: GraphState) -> GraphState:
     """
-    使用 LLM 评估搜索结果。
-    输出: confidence_score (置信度), reflection (反思)
+    使用小模型 (Ollama) 对搜索结果进行并行评分和过滤。
     """
     task = state['task']
     results = state['search_results']
     
-    print(f"🔹 [节点: 评估] 正在评估结果质量...")
+    print(f"🔹 [节点: 评估] 正在使用小模型并行评分 ({len(results)} 条)...")
     
-    # 转换为字符串供 LLM 阅读
-    results_str = _format_results_for_llm(results)
+    if 'all_scored_news' not in state:
+        state['all_scored_news'] = []
+        
+    filtered_this_round = []
     
-    # 构建 Prompt
-    prompt = EVALUATE_PROMPT.format(
-        task_type=task.task_type,
-        target_name=task.target_name,
-        search_results=results_str
-    )
+    SCORE_THRESHOLD = 0.7 # 0.7分及以上保留 (修正为 0.7 对应 0-1 范围，或者如果小模型输出 0-10 则需调整)
     
-    try:
-        response = llm.invoke(prompt)
-        content = response.content
+    def process_item(item):
+        """单个处理函数"""
+        analysis = small_model.analyze(
+            news_content=item.get('content', '')[:1000],
+            target_name=task.target_name
+        )
+        item_with_score = item.copy()
+        item_with_score['score'] = analysis['score']
+        item_with_score['reason'] = analysis['reason']
+        return item_with_score
+
+    # 并行执行，最大并发 4
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_item = {executor.submit(process_item, item): item for item in results}
         
-        # 解析 JSON 输出 (简单解析)
-        # 尝试查找被 markdown 包裹的 JSON 块
-        cleaned_content = content.replace("```json", "").replace("```", "").strip()
-        data = json.loads(cleaned_content)
-        
-        score = float(data.get("confidence_score", 0.0))
-        reflection = data.get("reflection", "未提供反思内容。")
-        
-        state['confidence_score'] = score
-        state['reflection'] = reflection
-        print(f"  -> 得分: {score}, 反思: {reflection[:50]}...")
-        
-    except Exception as e:
-        print(f"❌ [节点: 评估] 错误: {e}")
-        state['confidence_score'] = 0.0
-        state['reflection'] = f"评估过程中发生错误: {str(e)}"
- 
+        for future in as_completed(future_to_item):
+            try:
+                processed_item = future.result()
+                score = processed_item['score']
+                
+                # 存入全量历史
+                state['all_scored_news'].append(processed_item)
+                
+                if score >= SCORE_THRESHOLD:
+                    filtered_this_round.append(processed_item)
+                    print(f"  ✅ 保留 (分:{score}): {processed_item['title'][:20]}...")
+                else:
+                    print(f"  ❌ 拒绝 (分:{score}): {processed_item['title'][:20]}... 原因: {processed_item['reason'][:20]}")
+            except Exception as e:
+                 print(f"  ❌ 处理出错: {e}")
+
+    # 更新 filtered_news (累加策略)
+    if 'filtered_news' not in state:
+        state['filtered_news'] = []
+    
+    state['filtered_news'].extend(filtered_this_round)
+    
+    print(f"  -> 当前累计高质量新闻: {len(state['filtered_news'])} 条")
     return state
 
 def node_report(state: GraphState) -> GraphState:
     """
     使用 LLM 撰写最终报告。
+    支持 Fallback 逻辑。
     """
     task = state['task']
-    results = state['search_results']
+    filtered = state.get('filtered_news', [])
+    loop_count = state.get('loop_count', 0)
     
-    print(f"🔹 [节点: 报告] 正在撰写报告...")
+    used_news = filtered
+    
+    # Fallback 逻辑: 如果是最后一次尝试且高质量新闻不足 2 条，则强行取 Top 3
+    if len(filtered) < 2 and loop_count >= 3:
+        print("⚠️ [节点: 报告] 高质量新闻不足，触发 Fallback (Top 3)")
+        all_news = state.get('all_scored_news', [])
+        # 按分数降序
+        sorted_news = sorted(all_news, key=lambda x: x['score'], reverse=True)
+        used_news = sorted_news[:3]
+        state['filtered_news'] = used_news # 更新为这些新闻以便下文引用
+    
+    print(f"🔹 [节点: 报告] 正在撰写报告 (使用 {len(used_news)} 条素材)...")
     
     # 转换为字符串供 LLM 阅读
-    results_str = _format_results_for_llm(results)
+    results_str = _format_results_for_llm(used_news)
     
     prompt = REPORT_PROMPT.format(
         task_type=task.task_type,
@@ -117,18 +147,26 @@ def node_report(state: GraphState) -> GraphState:
 
 def node_optimize_query(state: GraphState) -> GraphState:
     """
-    优化节点: 基于反思生成更好的搜索词。
+    优化节点: 基于被拒绝新闻的原因生成新搜索词。
     """
     old_query = state['search_query']
-    score = state['confidence_score']
-    reflection = state['reflection']
+    all_news = state.get('all_scored_news', [])
+    
+    # 提取最近一轮的低分新闻原因
+    low_score_news = [n for n in all_news if n['score'] < 7]
+    recent_low = low_score_news[-5:] # 只取最后5个，避免Prompt过长
+    
+    reasons_str = "\n".join([f"- 标题: {n['title']}\n  原因: {n['reason']}" for n in recent_low])
     
     print(f"🔹 [节点: 优化] 正在优化搜索词...")
     
+    if not reasons_str:
+        reasons_str = "暂无具体拒绝原因 (可能由于网络原因小模型调用失败)"
+    
     prompt = QUERY_OPTIMIZE_PROMPT.format(
+        target_name=state['task'].target_name,
         old_query=old_query,
-        score=score,
-        reflection=reflection
+        rejected_reasons=reasons_str
     )
     
     try:
@@ -140,7 +178,6 @@ def node_optimize_query(state: GraphState) -> GraphState:
         
     except Exception as e:
         print(f"❌ [节点: 优化] 错误: {e}")
-        # 如果优化失败，尝试简单追加
         state['search_query'] = old_query + " 官方公告"
         state['loop_count'] = state.get('loop_count', 0) + 1
 

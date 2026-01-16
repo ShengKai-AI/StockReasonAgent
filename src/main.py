@@ -1,9 +1,29 @@
 import sys
 import os
 import argparse
+import toml
 
 # 如果需要本地执行，添加 src 到 python 路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 加载 secrets
+def load_secrets():
+    secrets_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".streamlit/secrets.toml")
+    if os.path.exists(secrets_path):
+        try:
+            secrets = toml.load(secrets_path)
+            # 加载顶级 key
+            for k, v in secrets.items():
+                if isinstance(v, str):
+                    os.environ[k] = v
+            # 加载 general section
+            if "general" in secrets:
+                for k, v in secrets["general"].items():
+                    os.environ[k] = v
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to load secrets: {e}")
+
+load_secrets()
 
 from src.dispatcher import AnalysisTask
 from src.graph.workflow import create_worker_graph
