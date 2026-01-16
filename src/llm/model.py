@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-from volcenginesdkarkruntime import Ark
+from langchain_openai import ChatOpenAI
 
 # 从 Streamlit Secrets 或环境变量加载 API Key
 def get_ark_api_key():
@@ -10,17 +10,20 @@ def get_ark_api_key():
 
 def init_llm():
     """
-    初始化 VolcBengine Ark 客户端。
+    初始化 LangChain ChatOpenAI 客户端 (适配 Volcengine Ark)。
     """
     api_key = get_ark_api_key()
     if not api_key:
         raise ValueError("❌ 未在 secrets.toml 或环境变量中找到 ARK_API_KEY。")
     
-    client = Ark(
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
-        api_key=api_key
+    # 使用 ChatOpenAI 封装
+    llm = ChatOpenAI(
+        model="deepseek-v3-2-251201", # 将模型名称统一配置在这里
+        openai_api_key=api_key,
+        openai_api_base="https://ark.cn-beijing.volces.com/api/v3",
+        temperature=0.3 # 降低温度以获得更稳定的评估结果
     )
-    return client
+    return llm
 
 # --- Prompts ---
 
@@ -80,6 +83,8 @@ QUERY_OPTIMIZE_PROMPT = """
 - 如果搜不到原因 -> 试着搜“传闻”、“股吧”、“小作文”。
 - 如果噪音太大 -> 增加“公告”、“官方”限定词。
 - 如果是概念跟风 -> 搜该概念的其他龙头名字。
+
+注意：不要在搜索关键词中添加时间限定词
 
 只输出新的关键词字符串，不要包含其他内容。
 """

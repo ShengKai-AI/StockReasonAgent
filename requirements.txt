@@ -7,3 +7,5 @@ streamlit-authenticator
 PyYAML
 volcengine-python-sdk[ark]
 langgraph
+langsmith
+langchain-openai

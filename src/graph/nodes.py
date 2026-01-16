@@ -3,7 +3,7 @@ from src.graph.state import GraphState
 from src.tools.search_tools import run_search
 from src.llm.model import init_llm, EVALUATE_PROMPT, REPORT_PROMPT, QUERY_OPTIMIZE_PROMPT
 
-llm_client = init_llm()
+llm = init_llm()
 
 def node_search(state: GraphState) -> GraphState:
     """
@@ -63,11 +63,8 @@ def node_evaluate(state: GraphState) -> GraphState:
     )
     
     try:
-        completion = llm_client.chat.completions.create(
-            model="deepseek-v3-2-251201", # 确保此 ID 与实际配置一致
-            messages=[{"role": "user", "content": prompt}]
-        )
-        content = completion.choices[0].message.content
+        response = llm.invoke(prompt)
+        content = response.content
         
         # 解析 JSON 输出 (简单解析)
         # 尝试查找被 markdown 包裹的 JSON 块
@@ -108,11 +105,8 @@ def node_report(state: GraphState) -> GraphState:
     )
     
     try:
-        completion = llm_client.chat.completions.create(
-            model="deepseek-v3-2-251201", 
-            messages=[{"role": "user", "content": prompt}]
-        )
-        report = completion.choices[0].message.content
+        response = llm.invoke(prompt)
+        report = response.content
         state['report_content'] = report
         print(f"  -> 报告已生成 ({len(report)} 字符).")
         
@@ -138,11 +132,8 @@ def node_optimize_query(state: GraphState) -> GraphState:
     )
     
     try:
-        completion = llm_client.chat.completions.create(
-            model="deepseek-v3-2-251201", 
-            messages=[{"role": "user", "content": prompt}]
-        )
-        new_query = completion.choices[0].message.content.strip()
+        response = llm.invoke(prompt)
+        new_query = response.content.strip()
         state['search_query'] = new_query
         state['loop_count'] = state.get('loop_count', 0) + 1
         print(f"  -> 新搜索词: {new_query} (循环次数: {state['loop_count']})")

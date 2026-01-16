@@ -1,4 +1,11 @@
 import streamlit as st
+import os
+
+# 将 secrets 注入环境变量，以便 LangChain 自动识别
+if "general" in st.secrets:
+    for key, value in st.secrets["general"].items():
+        os.environ[key] = value
+
 import pandas as pd
 import time
 from typing import List, Dict
